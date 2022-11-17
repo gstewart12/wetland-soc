@@ -18,16 +18,18 @@ source("R/unnest-depressions.R")
 
 # 1. Read data -----------------------------------------------------------------
 
-jl_dem <- rast("data/spatial/jackson-dem.tif")
-bc_dem <- rast("data/spatial/jones-dem.tif")
-dem <- merge(jl_dem, bc_dem)
-jl_aoi <- read_sf("data/spatial/jackson-ln-tnc") %>%
-  mutate(geometry = st_snap(geometry, geometry, tolerance = 0.5)) %>%
+dir_in <- "data/spatial"
+dir_out <- "output/spatial"
+
+bc_dem <- rast(file.path(dir_in, "bc-dem.tif"))
+jl_dem <- rast(file.path(dir_in, "jl-dem.tif"))
+dem <- merge(bc_dem, jl_dem)
+
+bc_aoi <- read_sf(file.path(dir_in, "jones-rd-tnc"))
+jl_aoi <- read_sf(file.path(dir_in, "jackson-ln-tnc"))
+aoi <- bind_rows(bc_aoi, jl_aoi) %>% 
+  mutate(geometry = st_snap(geometry, geometry, tolerance = 0.5)) %>% 
   summarize()
-bc_aoi <- read_sf("data/spatial/jones-rd-tnc") %>%
-  mutate(geometry = st_snap(geometry, geometry, tolerance = 0.5)) %>%
-  summarize()
-aoi <- summarize(bind_rows(jl_aoi, bc_aoi))
 
 
 # 2. Smooth DEM errors ---------------------------------------------------------
@@ -49,8 +51,8 @@ aoi <- summarize(bind_rows(jl_aoi, bc_aoi))
 # 3. Delineate wetlands --------------------------------------------------------
 
 # Read data
-jl_dem_cond <- rast("data/spatial/jl-dem-roto-lee1.tif")
-bc_dem_cond <- rast("data/spatial/bc-dem-roto-lee1.tif")
+bc_dem_cond <- rast(file.path(dir_out, "bc-dem-roto-lee1.tif"))
+jl_dem_cond <- rast(file.path(dir_out, "jl-dem-roto-lee1.tif"))
 dem_cond <- merge(jl_dem_cond, bc_dem_cond)
 
 # Helper function for finding weirdly shaped depressions
@@ -64,20 +66,24 @@ st_narrowness <- function(x) {
 
 # Conduct stochastic depression analysis
 # - unfortunately this cannot be exactly reproduced; no way to set seed
-jl_pdep <- run_wbt(
-  "stochastic_depression_analysis",
-  dem = jl_dem_cond, rmse = 0.15, range = 10, iterations = 500
-)
-writeRaster(jl_pdep, "data/spatial/jl-pdep.tif", overwrite = TRUE)
-
 bc_pdep <- run_wbt(
   "stochastic_depression_analysis",
   dem = jones_dem_cond, rmse = 0.15, range = 10, iterations = 500
 )
-writeRaster(bc_pdep, "data/spatial/bc-pdep.tif", overwrite = TRUE)
+writeRaster(
+  bc_pdep, file.path(dir_out, "spatial/bc-pdep.tif"), overwrite = TRUE
+)
+
+jl_pdep <- run_wbt(
+  "stochastic_depression_analysis",
+  dem = jl_dem_cond, rmse = 0.15, range = 10, iterations = 500
+)
+writeRaster(
+  bc_pdep, file.path(dir_out, "spatial/jl-pdep.tif"), overwrite = TRUE
+)
 
 # Mask depression areas with standard pdep threshold (0.8)
-pdep <- merge(jl_pdep, bc_pdep)
+pdep <- merge(bc_pdep, jl_pdep)
 pdep_thr <- pdep %>%
   classify(
     rbind(c(0, 0.8, 0), c(0.8, 1, 1)), include.lowest = TRUE
@@ -135,16 +141,16 @@ dep_nested <- dep_nested_auto %>%
   ) %>%
   select(-id)
 
-write_sf(dep_nested, "data/spatial/deps.gpkg")
+write_sf(dep_nested, file.path(dir_out, "deps.gpkg"))
 
 
 # 4. Delineate catchments ------------------------------------------------------
 
 # Read data
-dep_nested <- read_sf("data/spatial/deps.gpkg")
-jl_dem_cond <- rast("data/spatial/jl-dem-roto-lee1.tif")
-bc_dem_cond <- rast("data/spatial/bc-dem-roto-lee1.tif")
-dem_cond <- merge(jl_dem_cond, bc_dem_cond)
+dep_nested <- read_sf(file.path(dir_out, "deps.gpkg"))
+bc_dem_cond <- rast(file.path(dir_out, "bc-dem-roto-lee1.tif"))
+jl_dem_cond <- rast(file.path(dir_out, "jl-dem-roto-lee1.tif"))
+dem_cond <- merge(bc_dem_cond, jl_dem_cond)
 
 # Flow pointer for catchment delineation
 dem_flow_catch <- dem_cond %>%
@@ -176,12 +182,12 @@ dep_catch <- catch %>%
   left_join(select(st_drop_geometry(dep_nested), dep_id:level)) %>%
   arrange(dep_id)
 
-write_sf(dep_catch, "data/spatial/dep-catch.gpkg")
+write_sf(dep_catch, file.path(dir_out, "dep-catch.gpkg"))
 
 
 # 5. Subset study wetlands -----------------------------------------------------
 
-dep_nested <- read_sf("data/spatial/deps.gpkg")
+dep_nested <- read_sf(file.path(dir_out, "deps.gpkg"))
 wetland_info <- read_csv("output/wetland-data-ak.csv")
 
 # Subset study wetlands
@@ -208,17 +214,17 @@ wetlands <- dep_nested %>%
   ungroup() %>%
   st_as_sf()
 
-write_sf(wetlands, "data/spatial/wetlands.gpkg")
+write_sf(wetlands, file.path(dir_out, "wetlands.gpkg"))
 
 
 # 6. Calculate metrics ---------------------------------------------------------
 
 # Read data
-wetlands <- read_sf("data/spatial/wetlands.gpkg")
-dep_nested <- read_sf("data/spatial/deps.gpkg")
-dep_catch <- read_sf("data/spatial/dep-catch.gpkg")
-jl_dem_cond <- rast("data/spatial/jl-dem-roto-lee1.tif")
-bc_dem_cond <- rast("data/spatial/bc-dem-roto-lee1.tif")
+wetlands <- read_sf(file.path(dir_out, "wetlands.gpkg"))
+dep_nested <- read_sf(file.path(dir_out, "deps.gpkg"))
+dep_catch <- read_sf(file.path(dir_out, "dep-catch.gpkg"))
+bc_dem_cond <- rast(file.path(dir_out, "bc-dem-roto-lee1.tif"))
+jl_dem_cond <- rast(file.path(dir_out, "jl-dem-roto-lee1.tif"))
 dem_cond <- merge(jl_dem_cond, bc_dem_cond)
 
 ## 6.1. 2D shape metrics -------------------------------------------------------
@@ -373,7 +379,8 @@ profiles <- dep_nested %>%
 profiles
 # Results are similar using area vs. volume (as they should be)
 # - sticking with area - simpler
-write_csv(profiles, "output/dep-profile-coefs.csv")
+
+write_csv(profiles, file.path(dir_out, "dep-profile-coefs.csv"))
 
 ## 6.4. Catchment metrics ------------------------------------------------------
 
@@ -404,21 +411,26 @@ dep_metrics <- dep_nested %>%
   left_join(terrain_metrics) %>%
   left_join(catch_metrics) %>%
   left_join(select(profiles, dep_id, p))
-write_csv(dep_metrics, "output/dep-topo-metrics.csv")
+
+write_csv(dep_metrics, file.path(dir_out, "dep-topo-metrics.csv"))
 
 # Subset of metrics for analysis
-dep_metrics <- read_csv("output/dep-topo-metrics.csv")
-# topo_vars <- c("depth", "area", "shape_index", "rtp", "rel_ca_area", "p")
+topo_vars <- c(
+  "area", 
+  "depth" = "max_depth", 
+  "catchment" = "rel_ca_area", 
+  "profile" = "p",
+  "rtp" = "mean_dev", 
+  "shape" = "shape_index"
+)
 
 wetland_metrics <- wetlands %>%
   st_drop_geometry() %>%
   left_join(dep_metrics) %>%
   mutate(rel_ca_area = catch_area * 1e4 / area) %>%
-  select(
-    wetland, area, depth = max_depth, p, rel_ca_area, rtp = mean_dev, 
-    shape_index
-  )
-write_csv(wetland_metrics, "output/wetland-topo-metrics.csv")
+  select(wetland, all_of(topo_vars))
+
+write_csv(wetland_metrics, file.path(dir_out, "wetland-topo-metrics.csv"))
 
 
 # References -------------------------------------------------------------------
