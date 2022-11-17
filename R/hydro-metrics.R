@@ -6,9 +6,12 @@ library("tidyverse")
 
 # 1. Read data -----------------------------------------------------------------
 
+dir_in <- "data/water-level"
+dir_out <- "output/water-level"
+
 # Read water level data
-water_level <- read_csv("output/water-level-daily.csv")
-gapfill <- read_csv("output/water-level-gapfilled.csv")
+water_level <- read_csv(file.path(dir_in, "water-level-daily.csv"))
+gapfill <- read_csv(file.path(dir_in, "water-level-gapfilled.csv"))
 
 # Subset of wetlands for analysis
 wetlands <- c(
@@ -30,7 +33,7 @@ is_well_dry <- function(x, min_tol = 0.03, delta_tol = 0.005) {
   if_else(is_min & is_flat, 1L, 0L)
 }
 
-water_level_daily <- water_level %>%
+water_level_gf <- water_level %>%
   filter(name %in% paste(wetlands, "Wetland Well Shallow")) %>%
   left_join(gapfill) %>%
   mutate(
@@ -59,10 +62,10 @@ water_level_daily <- water_level %>%
   ungroup() %>%
   select(-name, -inund_pred, -gapfill_well)
 
-write_csv(water_level_daily, "output/water-level-daily-gapfilled.csv")
+write_csv(water_level_gf, file.path(dir_out, "water-level-daily-gapfilled.csv"))
 
 # Sanity check
-water_level_daily %>%
+water_level_gf %>%
   filter(year == 2019) %>%
   ggplot(aes(date, water_level_gf)) +
   facet_wrap(~ wetland) +
@@ -71,34 +74,48 @@ water_level_daily %>%
 
 # 3. Calculate yearly metrics --------------------------------------------------
 
-water_level_daily <- read_csv("output/water-level-daily-gapfilled.csv")
+water_level_gf <- read_csv(
+  file.path(dir_out, "water-level-daily-gapfilled.csv")
+)
 
-hydro_summary <- water_level_daily %>%
+hydro_summary <- water_level_gf %>%
   filter(year == 2019) %>%
   group_by(wetland) %>%
   # Need robust metrics since water level bottoms out
   summarize(
+    # Number of gap-filled days
     n_gf = sum(is.na(water_level)),
-    days_wet = sum(inund_gf),
-    date_dry = yday(first(date[which(inund_gf == 0)])),
     max = max(water_level_gf),
     median = median(water_level_gf),
     iqr = IQR(water_level_gf),
     mad = mad(water_level_gf),
+    # Number of days inundated
+    days_wet = sum(inund_gf),
+    # First dry date
+    date_dry = yday(first(date[which(inund_gf == 0)])),
+    # First date of last yearly inundation
+    date_wet = yday(last(date[which(inund_gf == 0)])) + 1,
+    # Number of times wetland dried out
+    n_dry = sum(abs(diff(inund_gf)))/2,
+    # Robust coefficient of variation
+    rcv = mad/median * 100,
+    # Median absolute water level change
     med_delta = median(abs(delta_1d)),
     .groups = "drop"
   ) %>%
   arrange(wetland)
 
-write_csv(hydro_summary, "output/hydro-summary-2018-2019.csv")
+write_csv(hydro_summary, file.path(dir_out, "hydro-summary-2018-2019.csv"))
 
 
 # 4. Calculate recession rates -------------------------------------------------
 
-water_level_daily <- read_csv("output/water-level-daily-gapfilled.csv")
+water_level_gf <- read_csv(
+  file.path(dir_out, "water-level-daily-gapfilled.csv")
+)
 
 # Apply criteria for 'recession days'
-rec_days <- water_level_daily %>%
+rec_days <- water_level_gf %>%
   filter(year == 2018) %>%
   group_by(wetland) %>%
   mutate(delta_lag = lag(delta_1d)) %>%
@@ -119,6 +136,9 @@ rec_days <- water_level_daily %>%
   ) %>%
   ungroup()
 
+# How many days?
+distinct(rec_days, date)
+
 # How are daily recessions distributed?
 rec_days %>%
   ggplot(aes(delta_1d)) +
@@ -127,20 +147,19 @@ rec_days %>%
 
 # Yearly rate is median of daily values (cm d-1)
 rec_rates <- rec_days %>%
-  group_by(wetland, year) %>% 
+  group_by(wetland) %>% 
   summarize(
-    n_days = n(), 
     rec_rate = median(delta_1d) * 100, 
     .groups = "drop"
   )
 
-write_csv(rec_rates, "output/recession-rates.csv")
+write_csv(rec_rates, file.path(dir_out, "recession-rates-2018.csv"))
 
 
 # 5. Select metrics for analysis -----------------------------------------------
 
-hydro_summary <- read_csv("output/hydro-summary-2018-2019.csv")
-rec_rates <- read_csv("output/recession-rates.csv")
+hydro_summary <- read_csv(file.path(dir_out, "hydro-summary-2018-2019.csv"))
+rec_rates <- read_csv(file.path(dir_out, "recession-rates.csv"))
 
 # Rename if needed
 hydro_vars <- c(
@@ -151,21 +170,21 @@ hydro_vars <- c(
 )
 
 hydro_metrics <- hydro_summary %>%
-  # Use 2019 for all metrics (except recession rate)
-  filter(year == 2019, wetland %in% wetlands_ak) %>%
-  select(-year) %>%
   left_join(rec_rates) %>%
   select(wetland, all_of(hydro_vars))
 hydro_metrics
-write_csv(hydro_metrics, "output/wetland-hydro-metrics.csv")
+
+write_csv(hydro_metrics, file.path(dir_out, "wetland-hydro-metrics.csv"))
 
 
 # 6. Climate & hydrograph plot -------------------------------------------------
 
 library("patchwork")
 
-climate <- read_csv("output/climate-vars-daily-fntower-2019.csv")
-water_level_daily <- read_csv("output/water-level-daily-gapfilled.csv")
+climate <- read_csv(file.path(dir_in, "climate-vars-daily-fntower-2019.csv"))
+water_level_gf <- read_csv(
+  file.path(dir_out, "water-level-daily-gapfilled.csv")
+)
 
 # Climate panel: daily temp. & precip.
 ppt_adj <- 20
@@ -200,7 +219,7 @@ climate_plot <- climate %>%
 climate_plot
 
 # Hydrograph panel: daily water level
-water_level_plot <- water_level_daily %>%
+water_level_plot <- water_level_gf %>%
   left_join(select(soc_data, wetland, site)) %>%
   filter(year == 2019) %>%
   ggplot(aes(date)) +
@@ -232,7 +251,7 @@ water_level_plot
 # Stack climate & hydrograph panels
 climate_water_plot <- climate_plot / water_level_plot + 
   plot_annotation(tag_levels = "a", tag_suffix = ")") &
-  scale_x_date(date_labels = "%b", expand = expansion(mult = c(0.025, 0.025))) &
+  scale_x_date(date_labels = "%b", expand = expansion(mult = 0.025)) &
   theme(
     axis.line = element_line(color = "black", size = 0.2),
     axis.title = element_text(size = 10.5),
@@ -244,6 +263,7 @@ climate_water_plot <- climate_plot / water_level_plot +
     plot.tag = element_text(size = 11)
   )
 climate_water_plot
+
 ggsave(
   "reports/plots/climate-waterlevel-plot.pdf", climate_water_plot, 
   device = cairo_pdf, width = 5.75, height = 5.00, units = "in"
