@@ -9,10 +9,14 @@ library("tidyverse")
 
 # 1. Read data -----------------------------------------------------------------
 
+dir_in <- "data/soil"
+dir_out <- "output/soil"
+
 # Forested wetland LOI, CN, and bulk density data
-loi_data <- read_csv("data/Anna/results/loi_all.csv")
-cn_data <- read_csv("data/Anna/results/cn.csv")
-bd_data <- read_csv("data/Anna/results/bd_all.csv")
+loi_data <- read_csv(file.path(dir_in, "loi_all.csv"))
+cn_data <- read_csv(file.path(dir_in, "cn.csv"))
+bd_data <- read_csv(file.path(dir_in, "bd_all.csv"))
+loi_emergent <- read_csv("output/loi-data-gs.csv")
 
 
 # 2. Predict SOC from LOI ------------------------------------------------------
@@ -20,7 +24,7 @@ bd_data <- read_csv("data/Anna/results/bd_all.csv")
 loi_c <- left_join(loi_data, cn_data)
 
 # Emergent wetland LOI samples
-loi_samples <- read_csv("output/loi-data-gs.csv") %>%
+loi_samples <- loi_emergent %>%
   separate(
     sample, c("wetland", "zonecore", "top_cm", "bottom_cm"), 
     remove = FALSE, convert = TRUE
@@ -68,7 +72,7 @@ loi_bd %>%
     method.args = list(start = c(a = 1, b = 1)), se = FALSE
   )
 
-# BD prediction method is mostly following Holmquist et al. (2018)
+# BD prediction method is mostly following [1]
 
 # "Ideal mixing model"
 # - technically should use nonlinear quantile regression because of
@@ -129,7 +133,8 @@ c_dens_pred <- loi_c_preds %>%
     c_dens_pred_lower = c_pred/100 * bd_pred_lower,
     c_dens_pred_upper = c_pred/100 * bd_pred_upper
   )
-write_csv(c_dens_pred, "output/soc-dens-pred-emergent.csv")
+
+write_csv(c_dens_pred, file.path(dir_out, "soc-dens-pred-emergent.csv"))
 
 # Convert horizons to fixed intervals
 c_dens_fixed <- c_dens_pred %>%
@@ -162,7 +167,8 @@ c_stock_est <- c_dens_fixed %>%
   summarize(
     c_stock_0_100_est = sum(c_dens_pred * depth_cm * 10), .groups = "drop"
   )
-write_csv(c_stock_est, "output/soc-stocks-est-core-emergent.csv")
+
+write_csv(c_stock_est, file.path(dir_out, "soc-stocks-est-core-emergent.csv"))
 
 # C stock estimates for each wetland/zone, with CIs from sampling variability
 c_stock_est_ci <- c_stock_est %>% 
@@ -179,7 +185,8 @@ c_stock_est_ci <- c_stock_est %>%
     c_stock_0_100_uci = c_stock_0_100_est + sd_core / sqrt(n) * qnorm(0.975)
   ) %>%
   select(wetland, zone, n_cores = n, everything())
-write_csv(c_stock_est_ci, "output/soc-stocks-est-emergent.csv")
+
+write_csv(c_stock_est_ci, file.path(dir_out, "soc-stocks-est-emergent.csv"))
 
 
 # References -------------------------------------------------------------------
