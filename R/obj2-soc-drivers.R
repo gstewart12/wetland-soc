@@ -1,6 +1,6 @@
 
-library("rdacca.hp")
 library("car")
+library("rdacca.hp")
 library("readxl")
 library("patchwork")
 library("lubridate")
@@ -13,7 +13,7 @@ library("tidyverse")
 
 core_ak <- read_csv("output/core-data-ak.csv")
 
-wetlands <- sf::read_sf("data/spatial/wetlands.gpkg")
+wetlands <- sf::read_sf("output/spatial/wetlands.gpkg")
 wetland_pts <- sf::st_centroid(wetlands)
 
 soc_data <- core_ak %>%
@@ -22,32 +22,11 @@ soc_data <- core_ak %>%
   select(wetland, site, c_stock = C_stock_100cm) %>%
   bind_cols(sf::st_coordinates(wetland_pts))
 
-water_level_daily <- read_csv("output/water-level-daily-gapfilled.csv")
-hydro_metrics <- read_csv("output/wetland-hydro-metrics.csv") %>%
-  rename(duration = days_wet, exposure = date_dry, recession = rec_rate)
+hydro_metrics <- read_csv("output/water-level/wetland-hydro-metrics.csv")
 hydro_vars <- names(hydro_metrics)[-1]
 
-topo_metrics <- read_csv("output/wetland-topo-metrics.csv") %>%
-  rename(catchment = rel_ca_area, profile = p, shape = shape_index)
+topo_metrics <- read_csv("output/spatial/wetland-topo-metrics.csv")
 topo_vars <- names(topo_metrics)[-1]
-
-climate <- read_csv("output/climate-vars-daily-fntower-2019.csv")
-
-format_metric_names <- function(x, add_units = FALSE) {
-  levels <- set_names(c(
-    "duration", "exposure", "iqr", "max", "median", "recession", "area", 
-    "catchment", "depth", "profile", "rtp", "shape"
-  ))
-  names(levels)[c(3, 11)] <- c("IQR", "RTP")
-  if (add_units) {
-    units <- c(
-      "days", "d.o.y.", "m", "m", "m", "cm~day^{-1}", "m^2", "", "m", "", "", ""
-    )
-    units <- if_else(units != "", paste0("~(", units, ")"), units)
-    names(levels) <- paste0(names(levels), units)
-  }
-  fct_recode(x, !!!levels)
-}
 
 
 # 2. Summary of all variables --------------------------------------------------
@@ -200,7 +179,7 @@ scattermat <- hydro_metrics %>%
     scales = "free", switch = "both"
   ) +
   geom_point(shape = 21) +
-  geom_smooth(se = FALSE, size = 0.4, span = 1.5) +
+  geom_smooth(se = FALSE, linewidth = 0.4, span = 1.5) +
   scale_y_continuous(expand = c(0.05, 0.05)) +
   scale_x_continuous(expand = c(0.05, 0.05)) +
   labs(x = NULL, y = NULL) +
@@ -323,7 +302,15 @@ metricplot_supp <- soc_data %>%
   mutate(
     well = wetland %in% hydro_metrics$wetland,
     group = if_else(name %in% hydro_vars, "hydro", "topo"),
-    name = format_metric_names(name, add_units = TRUE),
+    name = fct_recode(
+      name,
+      `median~(m)` = "median",
+      `IQR~(m)` = "iqr",
+      `exposure~(d.o.y.)` = "exposure",
+      `area~(m^2)` = "area",
+      `-1/catchment` = "catchment",
+      `RTP` = "rtp"
+    ),
     name = fct_reorder2(name, name, group, .fun = last2, .desc = FALSE)
   ) %>%
   ggplot(aes(value, c_stock, fill = site)) + 
