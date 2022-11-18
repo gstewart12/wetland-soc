@@ -4,14 +4,8 @@ library("tidyverse")
 
 # 1. Read data -----------------------------------------------------------------
 
-emergent <- read_csv("output/soc-stocks-est-emergent.csv") %>%
+emergent <- read_csv("output/soil/soc-stocks-est-emergent.csv") %>%
   mutate(type = if_else(wetland %in% c("DF", "FN", "JU"), "natu", "rest"))
-emergent_core <- read_csv("output/soc-stocks-est-core-emergent.csv") %>%
-  mutate(type = if_else(wetland %in% c("DF", "FN", "JU"), "natu", "rest")) %>%
-  with_groups(type, mutate, wetland = factor(as.integer(factor(wetland)))) %>%
-  mutate(
-    wetland = paste0(str_to_upper(str_trunc(type, 1, ellipsis = "")), wetland)
-  )
 
 forested <- read_csv("output/core-data-ak.csv")
 forested_mean <- forested %>%
@@ -19,12 +13,6 @@ forested_mean <- forested %>%
   summarize(c_stock_0_100 = mean(C_stock_100cm), .groups = "drop")
 
 # 2. Emergent wetland variability ----------------------------------------------
-
-# All variability
-emergent_core %>% 
-  ggplot(aes(zone, c_stock_0_100_est)) + 
-  facet_wrap(~ wetland, nrow = 1) + 
-  stat_summary()
 
 # Natural vs. restored
 emergent %>%
@@ -45,11 +33,6 @@ emergent %>%
 
 # Among-wetland variability 
 
-emergent_core %>% 
-  ggplot(aes(wetland, c_stock_0_100_est, color = type)) + 
-  facet_wrap(~ zone, nrow = 1) + 
-  stat_summary()
-
 # Mean of CVs for each zone
 emergent %>% 
   group_by(type, zone) %>% 
@@ -57,6 +40,7 @@ emergent %>%
   summarize(mean_cv = mean(cv))
 
 # Among-zone (within-wetland) variability 
+
 # Mean of CVs for each wetland
 emergent %>% 
   group_by(type, wetland) %>% 
@@ -94,7 +78,9 @@ forested_mean %>%
 emergent_range <- emergent %>%
   group_by(type, zone) %>%
   summarize(
-    min = min(c_stock_0_100_est), max = max(c_stock_0_100_est), .groups = "drop"
+    min = min(c_stock_0_100_est), 
+    max = max(c_stock_0_100_est), 
+    .groups = "drop"
   ) %>%
   # Hack to get everything to show up in the right place
   mutate(
@@ -154,6 +140,7 @@ soc_varplot <- forested_mean %>%
     panel.grid = element_blank()
   )
 soc_varplot
+
 ggsave(
   "reports/plots/soc-varplot.pdf", soc_varplot, device = cairo_pdf,
   width = 4.25, height = 3.25, units = "in"
